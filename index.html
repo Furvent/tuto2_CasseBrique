@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Casse-briques</title>
+</head>
+<body>
+    <canvas id="gameCanvas" width="800" height="600"></canvas>
+<script>
+var canvas;
+var canvasContext;
+
+// Ball
+const NORMAL_SPEED_X = 3, FAST_SPEED_X = 4, VFAST_SPEED_X = 6,
+      NORMAL_SPEED_Y = 5, BALL_RADIUS = 5;
+var ballX = 0, ballY = 0;
+var ballSpeedX = NORMAL_SPEED_X, ballSpeedY = NORMAL_SPEED_Y;
+
+// Paddle
+const PADDLE_HEIGHT = 10; const PADDLE_WIDTH = 100;
+var PADDLE_Y = 0; var paddleX = 0;
+
+// Flag
+var isPause = false;
+const RANDOMIZE_BRICKS_WALL = false;
+const TOP_ROWS_EMPTY_BRICKS = true; const HOW_MANY_ROWS_MUST_BE_EMPTY = 3;
+
+// BRICK WALL
+const BRICK_W = 80, BRICK_H = 20, BRICK_GAP = 2,
+      BRICK_COLS = 10, BRICK_ROWS = 14;
+var bricksGrid;
+
+window.onload = function()
+{
+    canvas = document.getElementById('gameCanvas');
+    canvasContext = canvas.getContext('2d');
+
+    // INIT //
+    bricksGrid = new Array(BRICK_COLS * BRICK_ROWS);
+    ballY =  ballX = 150; // TEMP
+    PADDLE_Y = canvas.height - 60;
+    resetBall();
+
+    newBricksWall();
+
+    canvas.addEventListener('mousemove', function(evt) {
+        var mousePos = calculateMousePos(evt);
+        paddleX = mousePos.x - (PADDLE_WIDTH / 2);
+    });
+    canvas.addEventListener('click', function(){
+        isPause = !isPause;
+    });
+
+    var framesPerSecond = 60;
+    setInterval(function() {
+        if (!isPause) {
+            moveEverything();
+            drawEverything();
+        }
+    }, 1000/framesPerSecond);
+};
+
+function moveEverything() {
+    moveBall();
+}
+
+function drawEverything() {
+    drawBgd();
+    drawWall();
+    drawBall();
+    drawPaddle();
+    drawDebug();
+}
+// WALL //
+function newBricksWall() {
+    if (RANDOMIZE_BRICKS_WALL) {
+        for (var i = 0; i < BRICK_COLS * BRICK_ROWS; i++) {
+            if (TOP_ROWS_EMPTY_BRICKS) {
+                var emptyBricks = HOW_MANY_ROWS_MUST_BE_EMPTY * BRICK_COLS;
+                if (i >= emptyBricks) {
+                    bricksGrid[i] = randomBrickGeneration();
+                } else {
+                    bricksGrid[i] = 0;
+                }
+            } else {
+                bricksGrid[i] = randomBrickGeneration();
+            }
+        }
+    } else {
+        for (var i = 0; i < BRICK_COLS * BRICK_ROWS; i++) {
+            if (TOP_ROWS_EMPTY_BRICKS) {
+                var emptyBricks = HOW_MANY_ROWS_MUST_BE_EMPTY * BRICK_COLS;
+                if (i >= emptyBricks) {
+                    bricksGrid[i] = 1;
+                } else {
+                    bricksGrid[i] = 0;
+                }
+            } else {
+                bricksGrid[i] = 1;
+            }
+        }
+    }
+}
+function wallIsEmpty() {
+    for (var i = 0; i <= bricksGrid.length; i++) {
+        if (bricksGrid[i] === 1) {
+            return false;
+        }
+    }
+    return true;
+}
+// WALL.BRICK //
+function breakAndBounceOffBrickAtPixelCoord(pixelX, pixelY) {
+    var tileCol = Math.floor(pixelX / BRICK_W);
+    var tileRow = Math.floor(pixelY / BRICK_H);
+    if (tileCol < 0 || tileCol >= BRICK_COLS ||
+        tileRow < 0 || tileRow >= BRICK_ROWS) {
+        //console.warn("BAM in function checkForAndRemoveBrickAtPixelCoord with " + pixelX + " and " + pixelY + " as arguments.");
+        return false;
+    }
+
+    var brickIndex = tileCol + BRICK_COLS * tileRow;
+    if (bricksGrid[brickIndex] === 1) {
+        var prevBallX = ballX - ballSpeedX;
+        var prevBallY = ballY - ballSpeedY;
+        var prevTileCol = Math.floor(prevBallX / BRICK_W);
+        var prevTileRow = Math.floor(prevBallY / BRICK_H);
+        
+        var bothTestsFailed = true;
+        
+        if (prevTileCol !== tileCol) { // Si != alors est arrivée à l'horizontal.
+            var adjacentBrickIndex = brickTileToIndex(prevTileCol, tileRow);
+            if (bricksGrid[adjacentBrickIndex] !== 1) {
+                ballSpeedX *= -1;
+                bothTestsFailed = false;
+            }
+        }
+
+        if (prevTileRow !== tileRow) { //Si != alors est arrivée à la verticale.
+            var adjacentBrickIndex = brickTileToIndex(tileCol, prevTileRow);
+            if (bricksGrid[adjacentBrickIndex] !== 1) {
+                ballSpeedY *= -1;
+                bothTestsFailed = false;
+            }
+        }
+
+        if(bothTestsFailed) {
+            ballSpeedX *= -1;
+            ballSpeedY *= -1;
+        }
+        bricksGrid[brickIndex] = 0;
+    }
+}
+function isBrickAtTileCoord(brickTileCol, brickTileRow) {
+    var brickIndex = brickTileToIndex(brickTileCol, brickTileRow);
+    if (bricksGrid[brickIndex] === 1) {
+        return true;
+    } else {
+        return false;
+    }
+}
+function brickTileToIndex(col, row) {
+    return col + BRICK_COLS * row;
+}
+function randomBrickGeneration() {
+    if (Math.random() < 0.5 ) {
+        return 1;
+    } else {
+        return 0;
+    }
+}
+// MOVE //
+function moveBall() {
+    if (isBallCollidePaddle()) {
+        changeBallSpeedWhenTouchingPaddle();
+        ballSpeedY *= -1;
+        ballY -= 5; // TESTING pour éviter bug ou la balle 'roule' sur le paddle.
+        console.log("Vitesse de la balle, x :" + ballSpeedX + " y:" + ballSpeedY);
+        // Réinitialisation du jeu si toutes les briques sont détruites :
+        if (wallIsEmpty()) {
+            newBricksWall();
+        }
+    } else if (ballX < 0 || ballX >= canvas.width){ // Si touche les côtés de l'écran.
+        ballSpeedX *= -1;
+    } else if (ballY < 0) { // Si touche le haut de l'écran.
+        ballSpeedY *= -1;
+    } else if (ballY >= canvas.height) { // Ou le bas.
+        resetBall();
+    }
+    breakAndBounceOffBrickAtPixelCoord(ballX, ballY);
+
+
+    ballY += ballSpeedY;
+    ballX += ballSpeedX;
+}
+function changeBallSpeedWhenTouchingPaddle() {
+    var whereBallTouchePaddleX = Math.abs(ballX - paddleX);
+    const PADDLE_PART = PADDLE_WIDTH / 5; // Permet de simuler 5 parties distinct sur le paddle.
+
+    if (whereBallTouchePaddleX < PADDLE_PART) { // Si tout à gauche,
+        console.log("part:" + whereBallTouchePaddleX + ". It's VFAST zone.");
+        ballSpeedX = VFAST_SPEED_X;
+//        if (ballSpeedX > 0) { // Si la balle va de gauche à droite (et ici touche le bord gauche).
+//            ballSpeedX *= -1; // On la fait repartir dans l'autre sens (de droite vers la gauche).
+//        }
+
+    } else if (whereBallTouchePaddleX >= PADDLE_PART*4) { // ou tout à droite.
+        console.log("part:" + whereBallTouchePaddleX + ". It's VFAST zone.");
+        ballSpeedX = VFAST_SPEED_X;
+//        if (ballSpeedX < 0) { // Si la balle va de droite à gauche (et ici sur le bord droi).
+//            ballSpeedX *= -1 // On la fait repartir dans l'autre sens (de gauche vers la droite).
+//        }
+
+    } else if ((whereBallTouchePaddleX >= PADDLE_PART && whereBallTouchePaddleX < PADDLE_PART * 2) // Si juste à gauche,
+        || (whereBallTouchePaddleX < PADDLE_PART * 4 && whereBallTouchePaddleX >= PADDLE_PART * 3)) { // ou juste à droite du mileu.
+        console.log("part:" + whereBallTouchePaddleX + ". It's FAST zone.");
+        ballSpeedX = FAST_SPEED_X;
+
+    } else { // Milieu
+        console.log("part:" + whereBallTouchePaddleX + ". It's NORMAL zone.");
+        ballSpeedX = NORMAL_SPEED_X;
+    }
+    // Si la balle touche la partie gauche de paddle et se déplace de la gauche vers la droite,
+    // on veut qu'elle se déplace de la droite vers la gauche.
+    if ( whereBallTouchePaddleX < PADDLE_WIDTH / 2 && ballSpeedX > 0) {
+        ballSpeedX *= -1;
+    // A l'invers...
+    } else if (whereBallTouchePaddleX > PADDLE_WIDTH / 2 && ballSpeedX < 0) {
+        ballSpeedX *= -1;
+    }
+}
+function resetBall() {
+    ballX = canvas.width / 2;
+    ballY = canvas.height * 0.8;
+    ballSpeedX = NORMAL_SPEED_X;
+    ballSpeedY = NORMAL_SPEED_Y;
+}
+// COLLIDES //
+/**
+ * Test une collision entre un cercle et un rectangle.
+ * CF http://stackoverflow.com/questions/21089959/detecting-collision-of-rectangle-with-circle
+ */
+function isBallCollidePaddle() {
+    var rect = {
+        x: paddleX,
+        y: PADDLE_Y,
+        w: PADDLE_WIDTH,
+        h: PADDLE_HEIGHT
+    };
+    var circle = {
+        x: ballX,
+        y: ballY,
+        r: BALL_RADIUS
+    };
+
+    var distX = Math.abs(circle.x - rect.x - rect.w / 2);
+    var distY = Math.abs(circle.y - rect.y - rect.h / 2);
+
+    if (distX > (rect.w / 2 + circle.r)) {return false; }
+    if (distY > (rect.h / 2 + circle.r)) {return false; }
+
+    if (distX <= (rect.w / 2)) {return true; }
+    if (distY <= (rect.h / 2)) {return true; }
+
+    var dx = distX - rect.w / 2;
+    var dy = distY - rect.h / 2;
+
+    // Pour les angles.
+    return (dx * dx + dy * dy <= (circle.r * circle.r));
+ }
+// RENDER //
+function drawBgd() {
+    canvasContext.fillStyle = 'black';
+    canvasContext.fillRect(0, 0, canvas.width, canvas.height);
+}
+function drawBall() {
+    canvasContext.fillStyle = 'white';
+    canvasContext.beginPath();
+    canvasContext.arc(ballX, ballY, BALL_RADIUS, 0, Math.PI*2, true);
+    canvasContext.fill();
+}
+function drawPaddle() {
+    canvasContext.fillStyle = 'blue';
+    canvasContext.fillRect(paddleX, PADDLE_Y, PADDLE_WIDTH, PADDLE_HEIGHT);
+}
+function drawDebug() {
+    canvasContext.fillStyle = 'red';
+    canvasContext.font = '15px Arial';
+    canvasContext.fillText("ballX:" + ballX, 10, 10);
+    canvasContext.fillText("paddleX:" + paddleX, 90, 10);
+}
+function drawWall() {
+    for (var eachCol = 0; eachCol < BRICK_COLS; eachCol++) {
+        for (var eachRow = 0; eachRow < BRICK_ROWS; eachRow++) {
+            if (isBrickAtTileCoord(eachCol, eachRow)) {
+                var brickLeftEdgeX = eachCol * BRICK_W;
+                var brickTopEdgeY = eachRow * BRICK_H;
+                drawBrick(brickLeftEdgeX, brickTopEdgeY);
+            }
+        }
+    }
+}
+function drawBrick(x, y) {
+    canvasContext.fillStyle = 'green';
+    canvasContext.fillRect(x, y, BRICK_W - BRICK_GAP, BRICK_H - BRICK_GAP);
+}
+// MOUSE //
+function calculateMousePos(evt) {
+    var rect = canvas.getBoundingClientRect();
+    var root = document.documentElement;
+
+    var mouseX = evt.clientX - rect.left - root.scrollLeft;
+    var mouseY = evt.clientY - rect.top - root.scrollTop;
+
+    return {
+        x: mouseX,
+        y: mouseY
+    };
+}
+</script>
+</body>
+</html>
